@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 
 from modules.live_monitor import LiveNetworkMonitor
-from modules.security_monitor import SecurityMonitor
+from modules.modules.security_monitor import SecurityMonitor
 from modules.report_generator import generate_pdf_report
 
 from network_analysis import analyze_pcap
