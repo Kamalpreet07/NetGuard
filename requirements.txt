@@ -1,6 +1,9 @@
+
 streamlit
 pandas
 plotly
 pyshark
 speedtest-cli
-
+scapy
+reportlab
+psutil
