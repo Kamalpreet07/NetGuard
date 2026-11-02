@@ -1,7 +1,6 @@
 
 import subprocess
 import threading
-import time
 from collections import Counter, deque
 from datetime import datetime
 
@@ -10,26 +9,30 @@ import pyshark
 
 class LiveNetworkMonitor:
 
-    def __init__(self):
+    def __init__(self, packet_callback=None):
+
         self.running = False
         self.capture = None
         self.thread = None
 
+        self.packet_callback = packet_callback
         self.lock = threading.Lock()
 
         self.total_packets = 0
         self.total_bytes = 0
+
         self.protocols = Counter()
         self.source_ips = Counter()
         self.destination_ips = Counter()
 
-        self.packet_history = deque(maxlen=100)
-        self.traffic_history = deque(maxlen=60)
+        self.packet_history = deque(maxlen=200)
+        self.traffic_history = deque(maxlen=120)
 
         self.start_time = None
         self.error = None
 
     def get_interfaces(self):
+
         try:
             result = subprocess.run(
                 ["tshark", "-D"],
@@ -52,23 +55,37 @@ class LiveNetworkMonitor:
 
             return interfaces
 
+        except FileNotFoundError:
+            self.error = (
+                "TShark is not installed or is not available "
+                "in the system PATH."
+            )
+            return []
+
         except Exception as error:
             self.error = str(error)
             return []
 
     def start_monitoring(self, interface):
+
         if self.running:
+            return False
+
+        if not interface:
+            self.error = "Please select a network interface."
             return False
 
         self.total_packets = 0
         self.total_bytes = 0
+
         self.protocols.clear()
         self.source_ips.clear()
         self.destination_ips.clear()
+
         self.packet_history.clear()
         self.traffic_history.clear()
-        self.error = None
 
+        self.error = None
         self.start_time = datetime.now()
         self.running = True
 
@@ -79,15 +96,19 @@ class LiveNetworkMonitor:
         )
 
         self.thread.start()
+
         return True
 
     def _capture_packets(self, interface):
+
         try:
-            self.capture = pyshark.LiveCapture(
+            capture = pyshark.LiveCapture(
                 interface=interface
             )
 
-            for packet in self.capture.sniff_continuously():
+            self.capture = capture
+
+            for packet in capture.sniff_continuously():
 
                 if not self.running:
                     break
@@ -99,6 +120,9 @@ class LiveNetworkMonitor:
                     source = "Unknown"
                     destination = "Unknown"
 
+                    source_port = None
+                    destination_port = None
+
                     if hasattr(packet, "ip"):
                         source = packet.ip.src
                         destination = packet.ip.dst
@@ -107,15 +131,26 @@ class LiveNetworkMonitor:
                         source = packet.ipv6.src
                         destination = packet.ipv6.dst
 
+                    if hasattr(packet, "tcp"):
+                        source_port = int(packet.tcp.srcport)
+                        destination_port = int(packet.tcp.dstport)
+
+                    elif hasattr(packet, "udp"):
+                        source_port = int(packet.udp.srcport)
+                        destination_port = int(packet.udp.dstport)
+
                     packet_info = {
                         "time": datetime.now().strftime("%H:%M:%S"),
                         "protocol": protocol,
                         "source": source,
                         "destination": destination,
+                        "source_port": source_port,
+                        "destination_port": destination_port,
                         "size": packet_size
                     }
 
                     with self.lock:
+
                         self.total_packets += 1
                         self.total_bytes += packet_size
 
@@ -134,6 +169,12 @@ class LiveNetworkMonitor:
                             "bytes": packet_size
                         })
 
+                    if self.packet_callback:
+                        try:
+                            self.packet_callback(packet_info)
+                        except Exception:
+                            pass
+
                 except Exception:
                     continue
 
@@ -143,7 +184,16 @@ class LiveNetworkMonitor:
         finally:
             self.running = False
 
+            if self.capture:
+                try:
+                    self.capture.close()
+                except Exception:
+                    pass
+
+            self.capture = None
+
     def stop_monitoring(self):
+
         self.running = False
 
         if self.capture:
@@ -152,23 +202,32 @@ class LiveNetworkMonitor:
             except Exception:
                 pass
 
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=2)
+
         return True
 
     def get_statistics(self):
+
         with self.lock:
+
             return {
                 "running": self.running,
                 "total_packets": self.total_packets,
                 "total_bytes": self.total_bytes,
                 "protocols": dict(self.protocols),
-                "source_ips": dict(self.source_ips.most_common(10)),
+                "source_ips": dict(
+                    self.source_ips.most_common(10)
+                ),
                 "destination_ips": dict(
                     self.destination_ips.most_common(10)
                 ),
                 "recent_packets": list(self.packet_history),
                 "traffic_history": list(self.traffic_history),
                 "start_time": (
-                    self.start_time.strftime("%Y-%m-%d %H:%M:%S")
+                    self.start_time.strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
                     if self.start_time else None
                 ),
                 "error": self.error
