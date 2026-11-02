@@ -8,7 +8,7 @@ from datetime import datetime
 
 from modules.live_monitor import LiveNetworkMonitor
 from modules.modules.security_monitor import SecurityMonitor
-from modules.report_generator import generate_pdf_report
+from modules.modules.modules.report_generator import generate_pdf_report
 
 from network_analysis import analyze_pcap
 from speed_test import run_speed_test
